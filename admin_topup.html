@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Top Up Approval</title>
+
+<style>
+body{
+    margin:0;
+    font-family:'Segoe UI';
+    background:#0f172a;
+    color:white;
+    text-align:center;
+}
+
+.login-box,
+.admin-box{
+    width:900px;
+    max-width:90%;
+    margin:50px auto;
+    background:#1e293b;
+    padding:30px;
+    border-radius:20px;
+    box-shadow:0 8px 25px rgba(0,0,0,0.25);
+}
+
+input{
+    width:90%;
+    padding:13px;
+    margin:10px;
+    border-radius:10px;
+    border:none;
+}
+
+button{
+    padding:12px 20px;
+    border:none;
+    border-radius:10px;
+    background:#38bdf8;
+    color:white;
+    cursor:pointer;
+    font-weight:bold;
+    margin:6px;
+}
+
+.approve-btn{ background:#22c55e; }
+.reject-btn{ background:#ef4444; }
+
+.card{
+    background:#111827;
+    border:1px solid #334155;
+    border-radius:15px;
+    padding:18px;
+    margin:18px auto;
+    width:90%;
+    text-align:left;
+}
+
+.pending{ color:#facc15; font-weight:bold; }
+.approved{ color:#22c55e; font-weight:bold; }
+
+.code{
+    background:white;
+    color:black;
+    padding:10px;
+    border-radius:8px;
+    font-weight:bold;
+    display:inline-block;
+}
+#requestList{
+    margin-top:25px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="loginBox" class="login-box">
+    <h1>Admin Login</h1>
+    <input id="adminPass" type="password" placeholder="Admin Password">
+    <br>
+    <button onclick="adminLogin()">Login</button>
+</div>
+
+<div id="adminBox" class="admin-box" style="display:none;">
+    <h1>Top Up Requests</h1>
+
+    <div id="requestList"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+
+import {
+    getAuth,
+    signInAnonymously,
+    onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+
+import {
+    getFirestore,
+    collection,
+    doc,
+    setDoc,
+    updateDoc,
+    onSnapshot,
+    serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyA1fwmPPjNGBw0gGYv6TSWmuZ41aNelzNc",
+    authDomain: "technoprenuership-4f49d.firebaseapp.com",
+    projectId: "technoprenuership-4f49d",
+    storageBucket: "technoprenuership-4f49d.firebasestorage.app",
+    messagingSenderId: "679400264773",
+    appId: "1:679400264773:web:f27707019e8bf8e9843f2c"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const ADMIN_PASSWORD = "123456";
+let alreadyListening = false;
+
+window.adminLogin = async () => {
+    const pass = document.getElementById("adminPass").value;
+
+    if(pass !== ADMIN_PASSWORD){
+        alert("Wrong admin password");
+        return;
+    }
+
+    try{
+        await signInAnonymously(auth);
+    }catch(err){
+        alert("Firebase Auth Error: " + err.message);
+        return;
+    }
+
+    document.getElementById("loginBox").style.display = "none";
+    document.getElementById("adminBox").style.display = "block";
+};
+
+onAuthStateChanged(auth,(user)=>{
+    if(user && !alreadyListening){
+        alreadyListening = true;
+        listenRequests();
+    }
+});
+
+function generateVoucher(){
+
+    const universities = [
+        "UM",
+        "USM",
+        "UTM",
+        "UKM",
+        "UPM",
+        "UTHM",
+        "UMP",
+        "UMT"
+    ];
+
+    const uni =
+        universities[Math.floor(Math.random() * universities.length)];
+
+    const number =
+        Math.floor(100 + Math.random() * 900);
+
+    return uni + number;
+}
+
+function listenRequests(){
+    onSnapshot(collection(db,"topupRequests"),(snap)=>{
+        const list = document.getElementById("requestList");
+        list.innerHTML = "";
+
+        if(snap.empty){
+            list.innerHTML = "<p>No top up request yet.</p>";
+            return;
+        }
+
+        snap.forEach(docu=>{
+            const data = docu.data();
+
+            const div = document.createElement("div");
+            div.className = "card";
+
+            div.innerHTML = `
+                <p><b>Email:</b> ${data.email || "No email"}</p>
+                <p><b>UID:</b> ${data.uid || "No UID"}</p>
+                <p><b>Amount:</b> ${data.amount} credits</p>
+                <p><b>Payment:</b> ${(data.payment || "").toUpperCase()}</p>
+                <p><b>Status:</b> 
+                    <span class="${data.status === 'approved' ? 'approved' : 'pending'}">
+                        ${(data.status || "pending").toUpperCase()}
+                    </span>
+                </p>
+                ${data.voucher ? `<p><b>Voucher:</b> <span class="code">${data.voucher}</span></p>` : ""}
+            `;
+
+            if(data.status === "pending"){
+                const approveBtn = document.createElement("button");
+                approveBtn.className = "approve-btn";
+                approveBtn.innerText = "Approve";
+
+                approveBtn.onclick = () => approveRequest(docu.id,data);
+
+                div.appendChild(approveBtn);
+            }
+
+            list.appendChild(div);
+        });
+
+    },(error)=>{
+        alert("Firestore Read Error: " + error.message);
+        console.error(error);
+    });
+}
+
+async function approveRequest(requestId,data){
+    try{
+        const voucher = generateVoucher();
+
+        await setDoc(doc(db,"coupons",voucher),{
+            amount:Number(data.amount),
+            createdAt:serverTimestamp(),
+            fromTopup:true,
+            uid:data.uid,
+            email:data.email,
+            payment:data.payment
+        });
+
+        await updateDoc(doc(db,"topupRequests",requestId),{
+            status:"approved",
+            voucher:voucher,
+            approvedAt:serverTimestamp()
+        });
+
+        alert("Approved. Voucher generated: " + voucher);
+
+    }catch(err){
+        alert("Approve Error: " + err.message);
+        console.error(err);
+    }
+}
+</script>
+
+</body>
+</html>
